@@ -12,7 +12,7 @@
       <header class="header">
         <div>
           <h1 class="title">Infinite Blackjack — Trainer</h1>
-          <div class="small">Fixed logic, clear UX</div>
+          <div class="small">Advanced card counting & betting</div>
         </div>
       </header>
 
@@ -79,7 +79,7 @@
       <header class="header">
         <div>
           <h2 class="title">Table</h2>
-          <div class="small">Editable dealer; split/double fixed; suggestions</div>
+          <div class="small">Card counting analysis & optimal play</div>
         </div>
         <div class="small">Hotkeys: H Hit · D Double · S Stand · P Split</div>
       </header>
@@ -105,8 +105,9 @@
 
           <div id="suggestBox" class="suggest">No active round</div>
 
-          <div class="small" style="margin-top:8px">Suggested bet</div>
+          <div class="small" style="margin-top:8px">Suggested bet (auto-updates)</div>
           <div id="betSuggestion" class="value big">—</div>
+          <button id="applyBet" class="btn ghost" style="margin-top:8px">Apply suggested bet</button>
 
           <div class="small" style="margin-top:10px">Sim iterations</div>
           <input id="mcIters" type="number" min="200" step="200" value="1600" style="width:140px;margin-top:6px"/>
