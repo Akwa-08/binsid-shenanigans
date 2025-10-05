@@ -52,25 +52,6 @@
         <button id="addManual" class="btn ghost">Add</button>
       </div>
 
-      <div class="controls">
-        <button id="undoLast" class="btn ghost">Undo</button>
-        <button id="drawRandom" class="btn ghost">Draw Random</button>
-        <button id="applyBurn" class="btn ghost">Mark Other Hit</button>
-      </div>
-
-      <section class="section">
-        <div class="small">Table cards (other players)</div>
-        <div id="tableCards" class="table-cards"></div>
-
-        <div class="small" style="margin-top:8px">Burned cards (other players)</div>
-        <div id="burnPile" class="table-cards"></div>
-
-        <div class="row" style="margin-top:8px">
-          <button id="autoBurnLast" class="btn ghost">Burn last table</button>
-          <button id="clearBurns" class="btn ghost">Clear burns</button>
-        </div>
-      </section>
-
       <div id="cardHistory" class="log"></div>
       <div class="footer">Click card = player; Shift+Click = dealer; Alt+Click = table. "Mark Other Hit" adds burned cards to the count.</div>
     </aside>
@@ -109,6 +90,13 @@
           <div id="betSuggestion" class="value big">—</div>
           <button id="applyBet" class="btn ghost" style="margin-top:8px">Apply suggested bet</button>
 
+          <!-- Side Bet Analysis Section -->
+          <div style="margin-top:16px;padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.05)">
+            <div id="sideBetAnalysis"></div>
+          </div>
+
+          <div id="oddsArea" class="small" style="margin-top:10px;color:var(--muted)">Action EV info</div>
+
           <div class="small" style="margin-top:10px">Sim iterations</div>
           <input id="mcIters" type="number" min="200" step="200" value="1600" style="width:140px;margin-top:6px"/>
 
@@ -117,6 +105,28 @@
             <button id="actDouble" class="btn secondary">Double (D)</button>
             <button id="actStand" class="btn secondary">Stand (S)</button>
             <button id="actSplit" class="btn secondary">Split (P)</button>
+          </div>
+
+          <!-- Other Players & Table Management Section -->
+          <div style="margin-top:16px;padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.05)">
+            <div class="small" style="font-weight:800;margin-bottom:8px">Other Players & Table</div>
+            
+            <div class="small" style="margin-bottom:6px">Table cards</div>
+            <div id="tableCards" class="table-cards" style="min-height:32px"></div>
+
+            <div class="small" style="margin-top:10px;margin-bottom:6px">Burned cards</div>
+            <div id="burnPile" class="table-cards" style="min-height:32px"></div>
+
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              <button id="undoLast" class="btn">Undo Last</button>
+              <button id="drawRandom" class="btn">Draw Random</button>
+              <button id="applyBurn" class="btn secondary">Mark Other Hit</button>
+            </div>
+            
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button id="autoBurnLast" class="btn ghost">Burn Last Table</button>
+              <button id="clearBurns" class="btn ghost">Clear Burns</button>
+            </div>
           </div>
 
           <div id="oddsArea" class="small" style="margin-top:10px;color:var(--muted)">Action EV info</div>

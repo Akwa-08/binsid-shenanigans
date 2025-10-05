@@ -15,12 +15,257 @@ let state = {
   game: { defaultDecks: 8, deckCounts: {}, seen: 0, running: 0, rounds: [] },
   current: null,
   tableCards: [],
-  burnPile: []
+  burnPile: [],
+  sideBets: {
+    hot3Enabled: false,
+    twentyOnePlus3Enabled: false,
+    perfectPairsEnabled: false,
+    bustItEnabled: false
+  }
 };
 let nextTableId = 1, nextBurnId = 1;
 let activeHandIndex = 0;
 let pickerMode = null, pickerTimeout = null;
 let currentSuggestedBet = MIN_BET;
+
+
+// Add after the existing constants at the top
+const SIDE_BETS = {
+  hot3: { name: 'HOT 3', minBet: 50, maxBet: 5000 },
+  twentyOnePlus3: { name: '21+3', minBet: 50, maxBet: 5000 },
+  perfectPairs: { name: 'Perfect Pairs', minBet: 50, maxBet: 5000 },
+  bustIt: { name: 'Bust It', minBet: 50, maxBet: 5000 }
+};
+
+// Add side bet tracking to state initialization
+// Modify the state object initialization
+
+
+// Side bet analysis functions
+
+// HOT 3 Analysis - Based on first 3 cards totaling 19, 20, or 21
+function analyzeHot3() {
+  const counts = state.game.deckCounts;
+  const totalCards = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (totalCards < 50) return { recommend: false, tc: 0, ev: -10, reason: 'Insufficient cards' };
+  
+  // Count high cards (9, 10, J, Q, K, A)
+  let highCards = 0;
+  ['9', '10', 'J', 'Q', 'K', 'A'].forEach(r => {
+    highCards += counts[r] || 0;
+  });
+  
+  const highRatio = totalCards > 0 ? highCards / totalCards : 0;
+  const decksLeft = Math.max(0.1, toNum($('decksLeft').value) || state.game.defaultDecks);
+  const tc = state.game.running / decksLeft;
+  
+  // HOT 3 becomes favorable when TC is high (more high cards remaining)
+  // Base EV is around -7% to -10%, improves with high count
+  let ev = -9.5 + (tc * 1.8); // Approximate EV calculation
+  
+  const recommend = tc >= 4 && highRatio > 0.35;
+  const reason = recommend ? 
+    `High count favorable (TC: ${tc.toFixed(1)}, ${(highRatio * 100).toFixed(1)}% high cards)` :
+    `Not favorable (TC: ${tc.toFixed(1)}, need TC ≥ +4)`;
+  
+  return { recommend, tc, ev, highRatio, reason };
+}
+
+// 21+3 Analysis - Three card poker with dealer upcard and player first two cards
+function analyze21Plus3() {
+  const counts = state.game.deckCounts;
+  const totalCards = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (totalCards < 50) return { recommend: false, tc: 0, ev: -8, reason: 'Insufficient cards' };
+  
+  const decksLeft = Math.max(0.1, toNum($('decksLeft').value) || state.game.defaultDecks);
+  const tc = state.game.running / decksLeft;
+  
+  // Calculate suited cards proportion
+  let suitedPotential = 0;
+  RANKS.forEach(r => {
+    const count = counts[r] || 0;
+    // Each rank has 4 cards, ideally distributed across suits
+    if (count >= 3) suitedPotential += count;
+  });
+  
+  const suitedRatio = totalCards > 0 ? suitedPotential / totalCards : 0;
+  
+  // 21+3 base EV is around -3% to -8% depending on paytable
+  // Favorable when there's higher concentration of same ranks (suited opportunities)
+  let ev = -6.5 + (tc * 1.2) + (suitedRatio * 8);
+  
+  const recommend = tc >= 3 && suitedRatio > 0.28;
+  const reason = recommend ?
+    `Favorable for flush/straight combos (TC: ${tc.toFixed(1)})` :
+    `Not favorable (TC: ${tc.toFixed(1)}, need TC ≥ +3)`;
+  
+  return { recommend, tc, ev, suitedRatio, reason };
+}
+
+// Perfect Pairs Analysis
+function analyzePerfectPairs() {
+  const counts = state.game.deckCounts;
+  const totalCards = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (totalCards < 50) return { recommend: false, tc: 0, ev: -7, reason: 'Insufficient cards' };
+  
+  const decksLeft = Math.max(0.1, toNum($('decksLeft').value) || state.game.defaultDecks);
+  const tc = state.game.running / decksLeft;
+  
+  // Check for ranks with multiple cards remaining (pair potential)
+  let pairPotential = 0;
+  let perfectPairPotential = 0; // Same suit pairs
+  
+  RANKS.forEach(r => {
+    const count = counts[r] || 0;
+    if (count >= 2) {
+      pairPotential += count * (count - 1) / 2; // Combinations
+      // Perfect pairs are 1/4 of all pairs (same suit)
+      if (count >= 2) perfectPairPotential += count / 4;
+    }
+  });
+  
+  const pairRatio = totalCards > 1 ? pairPotential / (totalCards * (totalCards - 1) / 2) : 0;
+  
+  // Perfect Pairs base EV is around -6% to -10%
+  // Most favorable when specific ranks are concentrated
+  let ev = -7.5 + (pairRatio * 35) + (tc * 0.8);
+  
+  const recommend = pairRatio > 0.08 && tc >= 1;
+  const reason = recommend ?
+    `High pair concentration (${(pairRatio * 100).toFixed(2)}% pair potential)` :
+    `Low pair potential (${(pairRatio * 100).toFixed(2)}%, need > 8%)`;
+  
+  return { recommend, tc, ev, pairRatio, perfectPairPotential, reason };
+}
+
+// Bust It Analysis - Dealer busts with specific number of cards
+function analyzeBustIt() {
+  const counts = state.game.deckCounts;
+  const totalCards = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (totalCards < 50) return { recommend: false, tc: 0, ev: -10, reason: 'Insufficient cards' };
+  
+  const decksLeft = Math.max(0.1, toNum($('decksLeft').value) || state.game.defaultDecks);
+  const tc = state.game.running / decksLeft;
+  
+  // Count low cards (2-6) that cause dealer to bust
+  let lowCards = 0;
+  ['2', '3', '4', '5', '6'].forEach(r => {
+    lowCards += counts[r] || 0;
+  });
+  
+  // Count mid cards (7-9)
+  let midCards = 0;
+  ['7', '8', '9'].forEach(r => {
+    midCards += counts[r] || 0;
+  });
+  
+  const lowRatio = totalCards > 0 ? lowCards / totalCards : 0;
+  const midRatio = totalCards > 0 ? midCards / totalCards : 0;
+  
+  // Bust It becomes favorable when there are MORE low cards (dealer draws more)
+  // Inverse of typical card counting - negative count is better!
+  // Base EV is around -8% to -12%
+  let ev = -10.5 - (tc * 2.5) + (lowRatio * 25) + (midRatio * 10);
+  
+  const recommend = tc <= -2 && lowRatio > 0.32;
+  const reason = recommend ?
+    `Favorable for dealer bust (TC: ${tc.toFixed(1)}, ${(lowRatio * 100).toFixed(1)}% low cards)` :
+    `Not favorable (TC: ${tc.toFixed(1)}, need TC ≤ -2 and high low card ratio)`;
+  
+  return { recommend, tc, ev, lowRatio, midRatio, reason };
+}
+
+// Combined side bet analysis
+function analyzeSideBets() {
+  const hot3 = analyzeHot3();
+  const twentyOnePlus3 = analyze21Plus3();
+  const perfectPairs = analyzePerfectPairs();
+  const bustIt = analyzeBustIt();
+  
+  return {
+    hot3,
+    twentyOnePlus3,
+    perfectPairs,
+    bustIt
+  };
+}
+
+// Update the UI to show side bet recommendations
+function updateSideBetRecommendations() {
+  const analysis = analyzeSideBets();
+  const container = $('sideBetAnalysis');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  
+  const title = document.createElement('div');
+  title.className = 'small';
+  title.style.fontWeight = '800';
+  title.style.marginBottom = '8px';
+  title.textContent = 'Side Bet Recommendations';
+  container.appendChild(title);
+  
+  // HOT 3
+  const hot3Div = createSideBetDisplay('HOT 3', analysis.hot3);
+  container.appendChild(hot3Div);
+  
+  // 21+3
+  const plus3Div = createSideBetDisplay('21+3', analysis.twentyOnePlus3);
+  container.appendChild(plus3Div);
+  
+  // Perfect Pairs
+  const ppDiv = createSideBetDisplay('Perfect Pairs', analysis.perfectPairs);
+  container.appendChild(ppDiv);
+  
+  // Bust It
+  const bustDiv = createSideBetDisplay('Bust It', analysis.bustIt);
+  container.appendChild(bustDiv);
+}
+
+function createSideBetDisplay(name, analysis) {
+  const div = document.createElement('div');
+  div.style.padding = '8px';
+  div.style.marginBottom = '6px';
+  div.style.borderRadius = '8px';
+  div.style.border = '1px solid rgba(255,255,255,0.04)';
+  div.style.background = analysis.recommend ? 
+    'linear-gradient(90deg, rgba(32,192,187,0.08), rgba(32,192,187,0.02))' : 
+    'rgba(255,255,255,0.01)';
+  
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.justifyContent = 'space-between';
+  header.style.alignItems = 'center';
+  header.style.marginBottom = '4px';
+  
+  const nameSpan = document.createElement('span');
+  nameSpan.style.fontWeight = '800';
+  nameSpan.style.fontSize = '13px';
+  nameSpan.textContent = name;
+  
+  const statusSpan = document.createElement('span');
+  statusSpan.style.fontSize = '12px';
+  statusSpan.style.fontWeight = '800';
+  statusSpan.style.color = analysis.recommend ? '#20c0bb' : '#9fb0b6';
+  statusSpan.textContent = analysis.recommend ? '✓ BET' : '✗ SKIP';
+  
+  header.appendChild(nameSpan);
+  header.appendChild(statusSpan);
+  
+  const info = document.createElement('div');
+  info.style.fontSize = '11px';
+  info.style.color = 'var(--muted)';
+  info.textContent = `EV: ${analysis.ev.toFixed(2)}% · ${analysis.reason}`;
+  
+  div.appendChild(header);
+  div.appendChild(info);
+  
+  return div;
+}
+
+// Modify the updateAll function to include side bet analysis
+// Find the existing updateAll function and add this line before updateUIState():
+// Add this right before the existing updateUIState() call in updateAll():
 
 // --- Deck helpers
 function initDeckCounts(decks) {
@@ -112,6 +357,9 @@ function updateAll() {
   // Update suggested bet
   currentSuggestedBet = calculateOptimalBet(balance, trueCount);
   updateBetSuggestion(trueCount);
+  
+  // Update side bet recommendations
+  updateSideBetRecommendations();
   
   updateUIState();
 }
@@ -1314,4 +1562,186 @@ function _runSuggestAll() {
                      (a === 'split' ? splitInfo.reason : 
                      'simulation'));
       
-      if
+      if (res.ev > best.ev) {
+        best = { action: a, ev: res.ev, reason, stats: res };
+      }
+    }
+    
+    if (!best.action) {
+      if($('suggestBox')) $('suggestBox').textContent = 'Unable to determine best action';
+      if($('oddsArea')) $('oddsArea').textContent = '';
+      return;
+    }
+    
+    const actionLabel = best.action.toUpperCase();
+    const evLabel = (best.ev >= 0 ? '+' : '') + best.ev.toFixed(2);
+    const winPct = (best.stats.win * 100).toFixed(1);
+    const pushPct = (best.stats.push * 100).toFixed(1);
+    const lossPct = (best.stats.loss * 100).toFixed(1);
+    
+    if($('suggestBox')) {
+      $('suggestBox').textContent = `Best: ${actionLabel} (EV: ${evLabel}) — ${best.reason}`;
+    }
+    
+    if($('oddsArea')) {
+      $('oddsArea').textContent = `${actionLabel}: Win ${winPct}% · Push ${pushPct}% · Loss ${lossPct}%`;
+    }
+  }, 50);
+}
+
+// --- Bet normalization
+function normalizeBet(v) {
+  const n = Number(v) || MIN_BET;
+  return Math.max(MIN_BET, Math.round(n / BET_STEP) * BET_STEP);
+}
+
+// --- Manual card add
+function addManualCard() {
+  const input = $('manualCard');
+  if (!input) return;
+  const val = input.value.trim().toUpperCase();
+  if (!val) return;
+  
+  if (!RANKS.includes(val)) {
+    alert('Invalid rank: ' + val);
+    return;
+  }
+  
+  addPlayerCard(val);
+  input.value = '';
+}
+
+// --- Random draw
+function drawRandomCard() {
+  const pool = [];
+  RANKS.forEach(r => {
+    for (let i = 0; i < (state.game.deckCounts[r] || 0); i++) pool.push(r);
+  });
+  
+  if (pool.length === 0) {
+    alert('No cards left in composition');
+    return;
+  }
+  
+  const picked = pool[randInt(pool.length)];
+  addPlayerCard(picked);
+}
+
+// --- Apply suggested bet
+function applySuggestedBet() {
+  if ($('bet')) {
+    $('bet').value = currentSuggestedBet;
+    log('Applied suggested bet: ' + currentSuggestedBet);
+  }
+}
+
+// --- Burn last table card
+function burnLastTable() {
+  if (!state.tableCards || state.tableCards.length === 0) {
+    alert('No table cards to burn');
+    return;
+  }
+  
+  const last = state.tableCards.pop();
+  addBurnCard(last.rank);
+  updateTable();
+  log('Moved table card to burn pile: ' + last.rank);
+}
+
+// --- Clear burns
+function clearBurns() {
+  if (!state.burnPile || state.burnPile.length === 0) return;
+  if (!confirm('Clear all burned cards?')) return;
+  
+  state.burnPile.forEach(b => returnCard(b.rank));
+  state.burnPile = [];
+  updateBurn();
+  updateAll();
+  suggestAll();
+  log('Cleared burn pile');
+}
+
+// --- Initialize
+function init() {
+  buildCardGrid();
+  
+  // Wire up all buttons
+  if ($('startNew')) $('startNew').addEventListener('click', startNewGame);
+  if ($('resetGame')) $('resetGame').addEventListener('click', resetAll);
+  if ($('startRound')) $('startRound').addEventListener('click', startRound);
+  if ($('cancelRound')) $('cancelRound').addEventListener('click', cancelRound);
+  if ($('endRound')) $('endRound').addEventListener('click', lockResolve);
+  if ($('undoLast')) $('undoLast').addEventListener('click', undoLast);
+  if ($('addManual')) $('addManual').addEventListener('click', addManualCard);
+  if ($('drawRandom')) $('drawRandom').addEventListener('click', drawRandomCard);
+  if ($('applyBurn')) $('applyBurn').addEventListener('click', () => openPicker('burn'));
+  if ($('autoBurnLast')) $('autoBurnLast').addEventListener('click', burnLastTable);
+  if ($('clearBurns')) $('clearBurns').addEventListener('click', clearBurns);
+  if ($('applyBet')) $('applyBet').addEventListener('click', applySuggestedBet);
+  
+  // Action buttons
+  if ($('actHit')) $('actHit').addEventListener('click', () => openPicker('hit'));
+  if ($('actDouble')) $('actDouble').addEventListener('click', () => openPicker('double'));
+  if ($('actStand')) $('actStand').addEventListener('click', standActive);
+  if ($('actSplit')) $('actSplit').addEventListener('click', doSplit);
+  
+  // Picker modal
+  if ($('pickerRandom')) $('pickerRandom').addEventListener('click', () => {
+    if (pickerMode === 'burn') pickBurnCard('RANDOM');
+    else if (pickerMode === 'double') pickDoubleCard('RANDOM');
+    else pickHitCard('RANDOM');
+  });
+  if ($('pickerCancel')) $('pickerCancel').addEventListener('click', closePicker);
+  
+  // Input changes
+  if ($('defaultDecks')) $('defaultDecks').addEventListener('input', () => {
+    state.game.defaultDecks = clamp(toNum($('defaultDecks').value), 1, 8);
+    updateAll();
+  });
+  if ($('decksLeft')) $('decksLeft').addEventListener('input', updateAll);
+  if ($('cashBal')) $('cashBal').addEventListener('input', updateAll);
+  if ($('bet')) $('bet').addEventListener('input', updateAll);
+  if ($('manualCard')) $('manualCard').addEventListener('keypress', e => {
+    if (e.key === 'Enter') addManualCard();
+  });
+  
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (!state.current || state.current.locked) return;
+    if (e.target.tagName === 'INPUT') return;
+    
+    switch(e.key.toLowerCase()) {
+      case 'h':
+        e.preventDefault();
+        if ($('actHit') && !$('actHit').disabled) openPicker('hit');
+        break;
+      case 'd':
+        e.preventDefault();
+        if ($('actDouble') && !$('actDouble').disabled) openPicker('double');
+        break;
+      case 's':
+        e.preventDefault();
+        if ($('actStand') && !$('actStand').disabled) standActive();
+        break;
+      case 'p':
+        e.preventDefault();
+        if ($('actSplit') && !$('actSplit').disabled) doSplit();
+        break;
+    }
+  });
+  
+  updateAll();
+  renderHands();
+  updateTable();
+  updateBurn();
+  updateRounds();
+  
+  log('Trainer initialized');
+}
+
+// Start when DOM ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
